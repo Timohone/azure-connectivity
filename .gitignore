@@ -1,0 +1,43 @@
+# Local .terraform directories
+**/.terraform/*
+
+# Terraform state files
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Ignore CLI configuration files
+.terraformrc
+terraform.rc
+
+# Lock files (can be kept if you want reproducible builds, otherwise ignore)
+.terraform.lock.hcl
+.terraform.lock copy.hcl
+
+# Sensitive variable files
+*.tfvars
+*.tfvars.json
+
+# Override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Ignore editor/IDE settings
+.vscode/
+.idea/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Python virtualenv (if using pre-commit hooks with Python)
+.venv/
+venv/
+__pycache__/
+
+# Pre-commit cache
+.pre-commit-config.yaml.terraform*
+.pre-commit-cache/

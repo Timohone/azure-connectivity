@@ -1,0 +1,114 @@
+# HRPortal Production Spoke - VEREINFACHT OHNE EIGENEN DNS RESOLVER
+# =============================================================================
+
+resource "azurerm_resource_group" "resource_group_hrportal_prod" {
+  name     = "rg-nccont-hrportal-prod"
+  location = "West Europe"
+  provider = azurerm.hrportal_prod
+}
+
+resource "azurerm_virtual_network" "vnet_hrportal_prod" {
+  name                = "vnet-nccont-hrportal-prod"
+  address_space       = ["10.1.2.0/24"]
+  location            = azurerm_resource_group.resource_group_hrportal_prod.location
+  resource_group_name = azurerm_resource_group.resource_group_hrportal_prod.name
+  provider            = azurerm.hrportal_prod
+}
+
+resource "azurerm_subnet" "subnet_hrportal_prod" {
+  name                 = "snet-hrportal-prod-default"
+  resource_group_name  = azurerm_resource_group.resource_group_hrportal_prod.name
+  virtual_network_name = azurerm_virtual_network.vnet_hrportal_prod.name
+  address_prefixes     = ["10.1.2.0/25"]
+  provider             = azurerm.hrportal_prod
+
+  depends_on = [azurerm_virtual_network.vnet_hrportal_prod]
+}
+
+# =============================================================================
+# PRIVATE DNS ZONES - SUBDOMAINS VON HUB ZONES
+# =============================================================================
+
+# Subdomain von Hub azure.contoso.com
+resource "azurerm_private_dns_zone" "hrportal_prod_azure" {
+  name                = "hrportal.azure.contoso.com"
+  resource_group_name = azurerm_resource_group.resource_group_hrportal_prod.name
+  provider            = azurerm.hrportal_prod
+}
+
+# =============================================================================
+# DNS ZONE LINKS - MIT AUTO REGISTRATION
+# =============================================================================
+
+resource "azurerm_private_dns_zone_virtual_network_link" "hrportal_prod_azure" {
+  name                  = "link-hrportal-azure-vnet"
+  resource_group_name   = azurerm_resource_group.resource_group_hrportal_prod.name
+  private_dns_zone_name = azurerm_private_dns_zone.hrportal_prod_azure.name
+  virtual_network_id    = azurerm_virtual_network.vnet_hrportal_prod.id
+  registration_enabled  = true
+  provider              = azurerm.hrportal_prod
+}
+
+# =============================================================================
+# VNET DNS KONFIGURATION - VERWENDET HUB DNS RESOLVER
+# =============================================================================
+
+resource "azurerm_virtual_network_dns_servers" "vnet_hrportal_prod" {
+  virtual_network_id = azurerm_virtual_network.vnet_hrportal_prod.id
+  dns_servers        = [data.azurerm_private_dns_resolver_inbound_endpoint.hub.ip_configurations[0].private_ip_address]
+  provider           = azurerm.hrportal_prod
+  
+  depends_on = [azurerm_virtual_network.vnet_hrportal_prod]
+}
+
+# =============================================================================
+# VIRTUAL MACHINES
+# =============================================================================
+
+resource "azurerm_network_interface" "nic_hrportal_prod" {
+  name                = "nic-hrportal-prod-vm001"
+  location            = azurerm_resource_group.resource_group_hrportal_prod.location
+  resource_group_name = azurerm_resource_group.resource_group_hrportal_prod.name
+  provider            = azurerm.hrportal_prod
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.subnet_hrportal_prod.id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+
+resource "azurerm_linux_virtual_machine" "vm_hrportal_prod" {
+  name                = "vm-hrportal-prod-001"
+  resource_group_name = azurerm_resource_group.resource_group_hrportal_prod.name
+  location            = azurerm_resource_group.resource_group_hrportal_prod.location
+  size                = "Standard_B2s"
+  admin_username      = "adminuser"
+  admin_password      = "P@ssw0rd123!"
+  provider            = azurerm.hrportal_prod
+
+  disable_password_authentication = false
+
+  network_interface_ids = [azurerm_network_interface.nic_hrportal_prod.id]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Premium_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  tags = {
+    usecase     = "hrportal"
+    environment = "production"
+  }
+
+  lifecycle {
+    ignore_changes = [boot_diagnostics]
+  }
+}

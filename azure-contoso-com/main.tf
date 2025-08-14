@@ -1,0 +1,107 @@
+# Contoso Hub Infrastructure
+# =============================================================================
+
+# Resource Group
+resource "azurerm_resource_group" "hub" {
+  name     = "rg-nccont-hub-p-weu"
+  location = "West Europe"
+}
+
+# Hub Virtual Network
+resource "azurerm_virtual_network" "hub" {
+  name                = "vnet-nccont-hub"
+  address_space       = ["10.0.0.0/16"]
+  location            = azurerm_resource_group.hub.location
+  resource_group_name = azurerm_resource_group.hub.name
+
+  tags = {
+    usecase     = "hub"
+    environment = "production"
+  }
+}
+
+#Subnets
+resource "azurerm_subnet" "gateway" {
+  name                 = "GatewaySubnet"
+  resource_group_name  = azurerm_resource_group.hub.name
+  virtual_network_name = azurerm_virtual_network.hub.name
+  address_prefixes     = ["10.0.32.0/24"]
+}
+
+resource "azurerm_subnet" "firewall" {
+  name                 = "AzureFirewallSubnet"
+  resource_group_name  = azurerm_resource_group.hub.name
+  virtual_network_name = azurerm_virtual_network.hub.name
+  address_prefixes     = ["10.0.33.0/24"]
+}
+
+resource "azurerm_subnet" "firewall_management" {
+  name                 = "AzureFirewallManagementSubnet"
+  resource_group_name  = azurerm_resource_group.hub.name
+  virtual_network_name = azurerm_virtual_network.hub.name
+  address_prefixes     = ["10.0.34.0/24"]
+}
+
+resource "azurerm_subnet" "dns_inbound" {
+  name                 = "snet-dnsresolver-inbound"
+  resource_group_name  = azurerm_resource_group.hub.name
+  virtual_network_name = azurerm_virtual_network.hub.name
+  address_prefixes     = ["10.0.35.0/24"]
+
+  delegation {
+    name = "Microsoft.Network.dnsResolvers"
+    service_delegation {
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+      name    = "Microsoft.Network/dnsResolvers"
+    }
+  }
+}
+
+resource "azurerm_subnet" "dns_outbound" {
+  name                 = "snet-dnsresolver-outbound"
+  resource_group_name  = azurerm_resource_group.hub.name
+  virtual_network_name = azurerm_virtual_network.hub.name
+  address_prefixes     = ["10.0.36.0/24"]
+
+  delegation {
+    name = "Microsoft.Network.dnsResolvers"
+    service_delegation {
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+      name    = "Microsoft.Network/dnsResolvers"
+    }
+  }
+}
+
+resource "azurerm_subnet" "management" {
+  name                 = "snet-management"
+  resource_group_name  = azurerm_resource_group.hub.name
+  virtual_network_name = azurerm_virtual_network.hub.name
+  address_prefixes     = ["10.0.37.0/24"]
+}
+
+# Log Analytics
+resource "azurerm_log_analytics_workspace" "hub" {
+  name                = "law-nccont-hub-001"
+  location            = azurerm_resource_group.hub.location
+  resource_group_name = azurerm_resource_group.hub.name
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+}
+
+resource "azurerm_monitor_diagnostic_setting" "firewall" {
+  name                       = "diag-afw-nccont-hub"
+  target_resource_id         = azurerm_firewall.hub.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.hub.id
+
+  enabled_log {
+    category = "AzureFirewallApplicationRule"
+  }
+
+  enabled_log {
+    category = "AzureFirewallNetworkRule"
+  }
+
+  enabled_log {
+    category = "AzureFirewallDnsProxy"
+  }
+}

@@ -1,0 +1,136 @@
+
+
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  name: 'ap-nccont-vmss-runners'
+
+variables:
+  - group: 'repo-inf-sub-nccont-connectivity-plf-p-variables'
+
+resources:
+  repositories:
+    - repository: pipeline-templates
+      type: git
+      name: cloud-foundation/pipeline-templates
+      ref: refs/heads/main
+
+stages:
+# ────────────────────────────── Stage "Plan" ──────────────────────────────
+- stage: Plan
+  displayName: 'Plan Stage'
+  jobs:
+  - job: PlanJob
+    displayName: 'Terraform Init and Plan (using READ service connection)'
+    steps:
+
+      - script: |
+          echo "Listing all files in pipeline-templates repository"
+          git ls-remote --heads $(Build.SourcesDirectory)
+        displayName: 'List files'
+
+      # Secrets from Key Vault (uses its own connection)
+      - task: AzureKeyVault@2
+        name: fetchSecrets
+        displayName: Get Key Vault secrets
+        inputs:
+          azureSubscription: 'sp-deployment-sub-nccont-connectivity-plf-p-rw'
+          KeyVaultName: 'kv-nccont-052c919b'
+          SecretsFilter: '*'
+
+      # Authentifizierung für den Read-Zugriff (Backend)
+      - template: login-populate-backend-env.yml@pipeline-templates
+        parameters:
+          azureSubscription: 'sp-deployment-sub-nccont-connectivity-plf-p-rw'
+
+      # Authentifizierung für den Read-Zugriff (ARM)
+      - template: login-populate-env.yml@pipeline-templates
+        parameters:
+          azureSubscription: 'sp-deployment-sub-nccont-connectivity-plf-p-rw'
+          tenantId: $(tenantId)
+
+      # Install Terraform
+      - template: terraform-install.yml@pipeline-templates
+        parameters:
+          terraformVersion: $(TF-VERSION)
+
+      # Terraform Init – Übergabe der Backend-Parameter
+      - template: terraform-init.yml@pipeline-templates
+        parameters:
+          azureSubscription: 'sp-deployment-sub-nccont-connectivity-plf-p-rw'
+          backendAccountName: $(TF-STORAGE-ACCOUNT-NAME)
+          backendContainerName: $(TF-STORAGE-ACCOUNT-CONTAINER-NAME)
+          backendKey: $(TF-STORAGE-ACCOUNT-KEY)
+          backendAccountRg: $(TF-STORAGE-ACCOUNT-RG)
+          tenantId: $(tenantId)
+          terraformTokenRegistry: $(TERRAFORM-TOKEN-REGISTRY)
+
+      # Terraform Plan – das Template definiert intern einen Schritt mit dem Namen "planStep"
+      - template: terraform-plan-with-artifact.yml@pipeline-templates
+        parameters:
+          planFile: tfplan
+          terraformTokenRegistry: $(TERRAFORM-TOKEN-REGISTRY)
+          azureSubscription: 'sp-deployment-sub-nccont-connectivity-plf-p-rw'
+
+
+# ────────────────────────────── Stage "Apply" ──────────────────────────────
+- stage: Apply
+  displayName: 'Apply Stage'
+  dependsOn: Plan
+  # Für Approvals/Gates muss hier ein Deployment-Job verwendet werden
+  jobs:
+  - deployment: ApplyJob
+    displayName: 'Terraform Apply (using WRITE service connection)'
+    environment: 'env-inf-sub-nccont-connectivity-plf-p'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+            - checkout: self
+
+            # Key Vault Secrets – uses its own connection
+            - task: AzureKeyVault@2
+              name: fetchSecrets
+              displayName: Get Key Vault secrets
+              inputs:
+                azureSubscription: 'sp-deployment-sub-nccont-connectivity-plf-p-rw'
+                KeyVaultName: 'kv-nccont-052c919b'
+                SecretsFilter: '*'
+
+            # AZ CLI Logout – ensures a clean slate for the az login
+            - bash: |
+                echo "📤 Logging out of any existing az session..."
+                az logout || true
+              displayName: "AZ logout (clean slate)"
+
+            # Authentifizierung mit WRITE-Rechten (ARM)
+            - template: login-populate-backend-env.yml@pipeline-templates
+              parameters:
+                azureSubscription: 'sp-deployment-sub-nccont-connectivity-plf-p-rw'
+                tenantId: $(tenantId)
+
+            # Install Terraform
+            - template: terraform-install.yml@pipeline-templates
+              parameters:
+                terraformVersion: $(TF-VERSION)
+
+            - template: terraform-init.yml@pipeline-templates
+              parameters:
+                azureSubscription: 'sp-deployment-sub-nccont-connectivity-plf-p-rw'
+                backendAccountName: $(TF-STORAGE-ACCOUNT-NAME)
+                backendContainerName: $(TF-STORAGE-ACCOUNT-CONTAINER-NAME)
+                backendKey: $(TF-STORAGE-ACCOUNT-KEY)
+                backendAccountRg: $(TF-STORAGE-ACCOUNT-RG)
+                tenantId: $(tenantId)
+                terraformTokenRegistry: $(TERRAFORM-TOKEN-REGISTRY)
+
+            # Terraform Apply – Übergabe des Plans aus der Plan-Stage
+            - template: terraform-apply-with-plan.yml@pipeline-templates
+              parameters:
+                planFile: tfplan
+                terraformTokenRegistry: $(TERRAFORM-TOKEN-REGISTRY)
+                azureSubscription: 'sp-deployment-sub-nccont-connectivity-plf-p-rw'

@@ -1,0 +1,114 @@
+# App1 Non-Production Spoke - VEREINFACHT OHNE EIGENEN DNS RESOLVER
+# =============================================================================
+
+resource "azurerm_resource_group" "rg_app1_nonprod" {
+  name     = "rg-nccont-app1-nonprod"
+  location = "West Europe"
+  provider = azurerm.app1_nonprod
+}
+
+resource "azurerm_virtual_network" "vnet_app1_nonprod" {
+  name                = "vnet-nccont-app1-nonprod"
+  address_space       = ["10.1.130.0/24"]
+  location            = azurerm_resource_group.rg_app1_nonprod.location
+  resource_group_name = azurerm_resource_group.rg_app1_nonprod.name
+  provider            = azurerm.app1_nonprod
+}
+
+resource "azurerm_subnet" "snet_app1_nonprod" {
+  name                 = "snet-app1-nonprod-default"
+  resource_group_name  = azurerm_resource_group.rg_app1_nonprod.name
+  virtual_network_name = azurerm_virtual_network.vnet_app1_nonprod.name
+  address_prefixes     = ["10.1.130.0/25"]
+  provider             = azurerm.app1_nonprod
+
+  depends_on = [azurerm_virtual_network.vnet_app1_nonprod]
+}
+
+# =============================================================================
+# PRIVATE DNS ZONES - SUBDOMAINS VON HUB ZONES
+# =============================================================================
+
+# Subdomain von Hub azure.contoso.com
+resource "azurerm_private_dns_zone" "app1_nonprod_azure" {
+  name                = "app1.azure.contoso.com"
+  resource_group_name = azurerm_resource_group.rg_app1_nonprod.name
+  provider            = azurerm.app1_nonprod
+}
+
+# =============================================================================
+# DNS ZONE LINKS - MIT AUTO REGISTRATION
+# =============================================================================
+
+resource "azurerm_private_dns_zone_virtual_network_link" "app1_nonprod_azure" {
+  name                  = "link-app1-azure-vnet"
+  resource_group_name   = azurerm_resource_group.rg_app1_nonprod.name
+  private_dns_zone_name = azurerm_private_dns_zone.app1_nonprod_azure.name
+  virtual_network_id    = azurerm_virtual_network.vnet_app1_nonprod.id
+  registration_enabled  = true
+  provider              = azurerm.app1_nonprod
+}
+
+# =============================================================================
+# VNET DNS KONFIGURATION - VERWENDET HUB DNS RESOLVER
+# =============================================================================
+
+resource "azurerm_virtual_network_dns_servers" "vnet_app1_nonprod" {
+  virtual_network_id = azurerm_virtual_network.vnet_app1_nonprod.id
+  dns_servers        = [data.azurerm_private_dns_resolver_inbound_endpoint.hub.ip_configurations[0].private_ip_address]
+  provider           = azurerm.app1_nonprod
+  
+  depends_on = [azurerm_virtual_network.vnet_app1_nonprod]
+}
+
+# =============================================================================
+# VIRTUAL MACHINES
+# =============================================================================
+
+resource "azurerm_network_interface" "nic_app1_nonprod" {
+  name                = "nic-app1-nonprod-vm001"
+  location            = azurerm_resource_group.rg_app1_nonprod.location
+  resource_group_name = azurerm_resource_group.rg_app1_nonprod.name
+  provider            = azurerm.app1_nonprod
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.snet_app1_nonprod.id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+
+resource "azurerm_linux_virtual_machine" "vm_app1_nonprod" {
+  name                = "vm-app1-nonprod-001"
+  resource_group_name = azurerm_resource_group.rg_app1_nonprod.name
+  location            = azurerm_resource_group.rg_app1_nonprod.location
+  size                = "Standard_B2s"
+  admin_username      = "adminuser"
+  admin_password      = "P@ssw0rd123!"
+  provider            = azurerm.app1_nonprod
+
+  disable_password_authentication = false
+
+  network_interface_ids = [azurerm_network_interface.nic_app1_nonprod.id]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Premium_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  tags = {
+    usecase     = "app1"
+    environment = "nonproduction"
+  }
+
+  lifecycle {
+    ignore_changes = [boot_diagnostics]
+  }
+}

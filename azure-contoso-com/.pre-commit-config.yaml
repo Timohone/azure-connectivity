@@ -1,0 +1,53 @@
+exclude: '^(pipelines/.*|\.gitignore$|\.pre-commit-config\.yml$|\.releaserc$|\.terraform-docs\.yml$|\.terraform-version$|baseline\.tf$)'
+repos:
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.2
+    hooks:
+      - id: terraform_fmt
+        args: ['--args=-recursive']
+      # - id: terraform_docs
+      - id: terraform_trivy
+      - id: terraform_tflint
+      # - id: terraform_validate
+      #   args:
+      #     - --hook-config=--retry-once-with-cleanup=true
+      - id: tfupdate
+        name: Autoupdate Terraform versions
+        args:
+          - --args=terraform
+          - --args=-v ">=1.4.2, < 2.0.0"
+      - id: tfupdate
+        name: Version Pin Azure provider
+        args:
+          - --args=provider azurerm
+          - --args=-v ">=4.20.0"
+      - id: tfupdate
+        name: Version Pin archive provider
+        args:
+          - --args=provider archive
+          - --args=-v ">=2.4.2"
+      - id: tfupdate
+        name: Version Pin null provider
+        args:
+          - --args=provider null
+          - --args=-v ">=3.2.2"
+      - id: tfupdate
+        name: Version Pin random provider
+        args:
+          - --args=provider random
+          - --args=-v ">=3.6.3"
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=*]
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+        exclude: '(^node_modules/)|(\.cf\.(yml|yaml)$)'
+      - id: check-json
+        exclude: '^node_modules/'
+      - id: check-merge-conflict
+      - id: double-quote-string-fixer
+      - id: end-of-file-fixer

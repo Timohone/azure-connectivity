@@ -1,0 +1,74 @@
+
+#---------------- PIPELINE TRIGGER ---------#
+trigger: none
+
+pool:
+  name: 'ap-nccont-vmss-runners'
+
+variables:
+  - group: 'repo-inf-sub-nccont-connectivity-plf-p-variables'
+
+resources:
+  repositories:
+    - repository: pipeline-templates
+      type: git
+      name: cloud-foundation/pipeline-templates
+      ref: refs/heads/main
+
+#---------------- STAGES -------------------#
+stages:
+- stage: Build
+  displayName: CI Build Stage
+  jobs:
+  - job: PrecommitPlanJob
+    displayName: Pre-commit, init, plan
+    steps:
+
+    # Repo listing
+    - script: ls -la
+      displayName: List repo contents
+
+    # Secrets from Key Vault (uses its own connection)
+    - task: AzureKeyVault@2
+      name: fetchSecrets
+      displayName: Get Key Vault secrets
+      inputs:
+        azureSubscription: 'sp-backend-sub-nccont-connectivity-plf-p-r'
+        KeyVaultName: 'kv-nccont-052c919b'
+        SecretsFilter: '*'
+
+    # Backend login (uses queue-time parameter)
+    - template: login-populate-backend-env.yml@pipeline-templates
+      parameters:
+        azureSubscription: 'sp-backend-sub-nccont-connectivity-plf-p-r'
+
+    # Env login (same service connection)
+    - template: login-populate-env.yml@pipeline-templates
+      parameters:
+        azureSubscription: 'sp-backend-sub-nccont-connectivity-plf-p-r'
+
+    # Terraform install
+    - template: terraform-install.yml@pipeline-templates
+      parameters:
+        terraformVersion: $(TF-VERSION)
+
+    # Terraform init
+    - template: terraform-init.yml@pipeline-templates
+      parameters:
+        azureSubscription: 'sp-backend-sub-nccont-connectivity-plf-p-r'
+        backendAccountName: $(TF-STORAGE-ACCOUNT-NAME)
+        backendContainerName: $(TF-STORAGE-ACCOUNT-CONTAINER-NAME)
+        backendKey: $(TF-STORAGE-ACCOUNT-KEY)
+        backendAccountRg: $(TF-STORAGE-ACCOUNT-RG)
+        tenantId: $(tenantId)
+        terraformTokenRegistry: $(TERRAFORM-TOKEN-REGISTRY)
+
+    # Pre-commit check
+    - template: pre-commit-check.yml@pipeline-templates
+
+    # Terraform plan
+    - template: terraform-plan.yml@pipeline-templates
+      parameters:
+        planFile: tfplan
+        terraformTokenRegistry: $(TERRAFORM-TOKEN-REGISTRY)
+        azureSubscription: 'sp-backend-sub-nccont-connectivity-plf-p-r'
